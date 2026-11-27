@@ -1,0 +1,73 @@
+name: Deploy ECLIPSE to Pages
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Release containing the ECLIPSE game archive"
+        default: v11
+        required: true
+        type: string
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: eclipse-pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Prepare game files
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag || 'v11' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p pages-site
+          if [[ -f docs/index.html ]]; then
+            cp -a docs/. pages-site/
+          else
+            gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+              --pattern 'ECLIPSE_V*_GitHub_Pages.zip' --dir "$RUNNER_TEMP"
+            archives=("$RUNNER_TEMP"/ECLIPSE_V*_GitHub_Pages.zip)
+            test "${#archives[@]}" -eq 1
+            unzip -q "${archives[0]}" -d "$RUNNER_TEMP/eclipse"
+            sites=("$RUNNER_TEMP"/eclipse/pages-v*/docs)
+            test "${#sites[@]}" -eq 1
+            cp -a "${sites[0]}"/. pages-site/
+          fi
+          test -f pages-site/index.html
+          test -f pages-site/game.js
+          test -f pages-site/combat.js
+          test -d pages-site/animation
+          test -d pages-site/projectiles
+          test "$(find pages-site -type f | wc -l)" -ge 1500
+          touch pages-site/.nojekyll
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+      - name: Upload complete game
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: pages-site
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
