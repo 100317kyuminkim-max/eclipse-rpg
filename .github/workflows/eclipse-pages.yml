@@ -1,11 +1,10 @@
 name: Deploy ECLIPSE to Pages
-
 on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: "Release containing the ECLIPSE game archive"
-        default: v11
+        description: "v12 = expanded labyrinth; v11 = rollback"
+        default: v12
         required: true
         type: string
   push:
@@ -32,22 +31,30 @@ jobs:
       - name: Prepare game files
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ inputs.release_tag || 'v11' }}
+          RELEASE_TAG: ${{ inputs.release_tag || 'v12' }}
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p pages-site
+          mkdir -p pages-site "$RUNNER_TEMP/eclipse-base" "$RUNNER_TEMP/eclipse-update"
           if [[ -f docs/index.html ]]; then
             cp -a docs/. pages-site/
           else
-            gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
-              --pattern 'ECLIPSE_V*_GitHub_Pages.zip' --dir "$RUNNER_TEMP"
-            archives=("$RUNNER_TEMP"/ECLIPSE_V*_GitHub_Pages.zip)
-            test "${#archives[@]}" -eq 1
-            unzip -q "${archives[0]}" -d "$RUNNER_TEMP/eclipse"
-            sites=("$RUNNER_TEMP"/eclipse/pages-v*/docs)
-            test "${#sites[@]}" -eq 1
-            cp -a "${sites[0]}"/. pages-site/
+            case "$RELEASE_TAG" in
+              v11|v12) ;;
+              *) echo "Unsupported release: $RELEASE_TAG"; exit 1 ;;
+            esac
+            gh release download v11 --repo "$GITHUB_REPOSITORY" --pattern 'ECLIPSE_V11_GitHub_Pages.zip' --dir "$RUNNER_TEMP/eclipse-base"
+            unzip -q "$RUNNER_TEMP/eclipse-base/ECLIPSE_V11_GitHub_Pages.zip" -d "$RUNNER_TEMP/eclipse-base"
+            test -f "$RUNNER_TEMP/eclipse-base/pages-v11/docs/index.html"
+            cp -a "$RUNNER_TEMP/eclipse-base/pages-v11/docs/." pages-site/
+            if [[ "$RELEASE_TAG" == v12 ]]; then
+              gh release download v12 --repo "$GITHUB_REPOSITORY" --pattern 'ECLIPSE_V12_GitHub_Pages.zip' --dir "$RUNNER_TEMP/eclipse-update"
+              echo "eceb9b679a8ddef9d6520af9cb22b7fe89e50e1bc3ebd24268ebb757417f4f19  $RUNNER_TEMP/eclipse-update/ECLIPSE_V12_GitHub_Pages.zip" | sha256sum -c -
+              unzip -q "$RUNNER_TEMP/eclipse-update/ECLIPSE_V12_GitHub_Pages.zip" -d "$RUNNER_TEMP/eclipse-update"
+              test -f "$RUNNER_TEMP/eclipse-update/pages-v12/DELTA_BASE_V11.txt"
+              cp -a "$RUNNER_TEMP/eclipse-update/pages-v12/docs/." pages-site/
+              test -f pages-site/stage-v12.css
+            fi
           fi
           test -f pages-site/index.html
           test -f pages-site/game.js
@@ -64,6 +71,7 @@ jobs:
           name: github-pages
           path: pages-site
           retention-days: 1
+
   deploy:
     needs: build
     runs-on: ubuntu-latest
