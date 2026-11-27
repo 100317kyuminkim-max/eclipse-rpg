@@ -13,23 +13,17 @@ on:
     paths:
       - 'docs/**'
 
-permissions:
-  contents: read
-  pages: write
-  id-token: write
-
 concurrency:
   group: eclipse-pages
   cancel-in-progress: false
 
 jobs:
-  deploy:
-    if: github.ref == 'refs/heads/main'
+  build:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      contents: read
+      pages: read
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -67,7 +61,40 @@ jobs:
       - name: Upload complete game
         uses: actions/upload-pages-artifact@v4
         with:
+          name: github-pages
           path: pages-site
+          retention-days: 1
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Confirm Pages artifact is visible
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in {1..12}; do
+            count=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" --jq '[.artifacts[] | select(.name == "github-pages" and .expired == false)] | length' || true)
+            if [[ "$count" == 1 ]]; then
+              echo "Pages artifact is ready."
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Pages artifact is not visible after waiting."
+          exit 1
       - name: Deploy
         id: deployment
         uses: actions/deploy-pages@v4
+        with:
+          artifact_name: github-pages
