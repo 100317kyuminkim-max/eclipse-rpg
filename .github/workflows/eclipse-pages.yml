@@ -3,8 +3,8 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: "v12 = expanded labyrinth; v11 = rollback"
-        default: v12
+        description: "v13 = Layered30; v12 = deep labyrinth; v11 = rollback"
+        default: v13
         required: true
         type: string
   push:
@@ -19,7 +19,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     permissions:
       contents: read
       pages: read
@@ -31,29 +31,40 @@ jobs:
       - name: Prepare game files
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ inputs.release_tag || 'v12' }}
+          RELEASE_TAG: ${{ inputs.release_tag || 'v13' }}
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p pages-site "$RUNNER_TEMP/eclipse-base" "$RUNNER_TEMP/eclipse-update"
+          mkdir -p pages-site "$RUNNER_TEMP/eclipse-base" "$RUNNER_TEMP/eclipse-update" "$RUNNER_TEMP/eclipse-v13"
           if [[ -f docs/index.html ]]; then
             cp -a docs/. pages-site/
           else
             case "$RELEASE_TAG" in
-              v11|v12) ;;
+              v11|v12|v13) ;;
               *) echo "Unsupported release: $RELEASE_TAG"; exit 1 ;;
             esac
             gh release download v11 --repo "$GITHUB_REPOSITORY" --pattern 'ECLIPSE_V11_GitHub_Pages.zip' --dir "$RUNNER_TEMP/eclipse-base"
+            echo "4b354273c1612e70b08060c10605620254f4ff076539d1a5e4075e4b1950a91b  $RUNNER_TEMP/eclipse-base/ECLIPSE_V11_GitHub_Pages.zip" | sha256sum -c -
             unzip -q "$RUNNER_TEMP/eclipse-base/ECLIPSE_V11_GitHub_Pages.zip" -d "$RUNNER_TEMP/eclipse-base"
             test -f "$RUNNER_TEMP/eclipse-base/pages-v11/docs/index.html"
             cp -a "$RUNNER_TEMP/eclipse-base/pages-v11/docs/." pages-site/
-            if [[ "$RELEASE_TAG" == v12 ]]; then
+            if [[ "$RELEASE_TAG" == v12 || "$RELEASE_TAG" == v13 ]]; then
               gh release download v12 --repo "$GITHUB_REPOSITORY" --pattern 'ECLIPSE_V12_GitHub_Pages.zip' --dir "$RUNNER_TEMP/eclipse-update"
               echo "eceb9b679a8ddef9d6520af9cb22b7fe89e50e1bc3ebd24268ebb757417f4f19  $RUNNER_TEMP/eclipse-update/ECLIPSE_V12_GitHub_Pages.zip" | sha256sum -c -
               unzip -q "$RUNNER_TEMP/eclipse-update/ECLIPSE_V12_GitHub_Pages.zip" -d "$RUNNER_TEMP/eclipse-update"
               test -f "$RUNNER_TEMP/eclipse-update/pages-v12/DELTA_BASE_V11.txt"
               cp -a "$RUNNER_TEMP/eclipse-update/pages-v12/docs/." pages-site/
               test -f pages-site/stage-v12.css
+            fi
+            if [[ "$RELEASE_TAG" == v13 ]]; then
+              gh release download v13 --repo "$GITHUB_REPOSITORY" --pattern 'ECLIPSE_V13_GitHub_Pages.zip' --dir "$RUNNER_TEMP/eclipse-v13"
+              echo "70052f3bdc2a6b109a8d5107a2b44f0beab6260d34b93ed4f53e7e218169d490  $RUNNER_TEMP/eclipse-v13/ECLIPSE_V13_GitHub_Pages.zip" | sha256sum -c -
+              unzip -q "$RUNNER_TEMP/eclipse-v13/ECLIPSE_V13_GitHub_Pages.zip" -d "$RUNNER_TEMP/eclipse-v13"
+              test -f "$RUNNER_TEMP/eclipse-v13/pages-v13/DELTA_BASE_V12.txt"
+              cp -a "$RUNNER_TEMP/eclipse-v13/pages-v13/docs/." pages-site/
+              test -f pages-site/v13/manifest.js
+              test -f pages-site/v13-art.js
+              grep -q 'V13 · 50개 전투방' pages-site/index.html
             fi
           fi
           test -f pages-site/index.html
@@ -62,6 +73,9 @@ jobs:
           test -d pages-site/animation
           test -d pages-site/projectiles
           test "$(find pages-site -type f | wc -l)" -ge 1500
+          size=$(du -sb pages-site | cut -f1)
+          echo "Uncompressed Pages tree: $size bytes"
+          test "$size" -lt 1000000000
           touch pages-site/.nojekyll
       - name: Configure Pages
         uses: actions/configure-pages@v5
@@ -75,7 +89,7 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     permissions:
       actions: read
       contents: read
